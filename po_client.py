@@ -37,7 +37,9 @@ _OPTION_TYPE_TURBO = 100
 # mismatch" section) -- key is what signal_parser produces, value is the
 # real Asset enum member name.
 ASSET_ALIASES: dict[str, str] = {
-    # "USDARS_otc": "USD_ARS_otc",  # example -- replace with the real name
+    "USDARS_otc": "USDARS_OTC", # Or "USD_ARS_OTC" depending on the models.Asset Enum
+    "EURUSD_otc": "EURUSD_OTC",
+    "NGNUSD_otc": "NGNUSD_OTC",
 }
 
 

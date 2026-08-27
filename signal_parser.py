@@ -44,10 +44,12 @@ class ParsedSignal:
     asset: str | None = None
     is_otc: bool = False
     direction: str | None = None          # "call" or "put"
-    entry_time: str | None = None         # "HH:MM" (exchange/channel local time)
+    entry_time: str | None = None         # "HH:MM" (in the channel's stated timezone, if any)
     expiration_minutes: int | None = None
     martingale_times: list[str] = field(default_factory=list)
     martingale_count: int = 0
+    utc_offset_hours: float | None = None  # detected from message text, e.g. "UTC -3" -> -3.0
+    immediate: bool = False                # True if the signal has no entry time at all -> trade now
     is_valid: bool = False
     error: str | None = None
 
@@ -56,20 +58,27 @@ class ParsedSignal:
         """Return the asset in POCKET_OPTION style, e.g. EURGBP_otc."""
         if not self.asset:
             return None
-        base = self.asset.replace("/", "").upper()
+        base = re.sub(r"[/\-_]", "", self.asset).upper()
         return f"{base}_otc" if self.is_otc else base
 
 
 _LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*\)")          # markdown links -> strip
 _TIME_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
-_SLASH_PAIR_RE = re.compile(r"\b([A-Z]{3})\s*/\s*([A-Z]{3})\b")
+_SLASH_PAIR_RE = re.compile(r"\b([A-Z]{3})\s*[/\-_]\s*([A-Z]{3})\b")
 _SMASHED_PAIR_RE = re.compile(r"\b([A-Z]{6})\b")
-_EXPIRY_RE_1 = re.compile(r"expir\w*\s*:?\s*(\d+)\s*m\b", re.IGNORECASE)
+_EXPIRY_RE_1 = re.compile(r"exp(?:ir\w*)?\s*:?\s*(\d+)\s*m\b", re.IGNORECASE)
 _EXPIRY_RE_2 = re.compile(r"\(m(\d+)\)", re.IGNORECASE)
+_EXPIRY_RE_3 = re.compile(r"\b(\d{1,3})\s*minutes?\b", re.IGNORECASE)   # "15 minutes", no label
+_EXPIRY_RE_4 = re.compile(r"\bm(\d{1,3})\b", re.IGNORECASE)             # bare "M2", no parens/label
 _ENTRY_RE = re.compile(r"entry\w*\s*(?:at)?:?\s*([01]?\d|2[0-3]):([0-5]\d)", re.IGNORECASE)
 _GALE_COUNT_RE = re.compile(r"(\d+)\s*gale", re.IGNORECASE)
-_BUY_RE = re.compile(r"\b(buy|call)\b", re.IGNORECASE)
-_SELL_RE = re.compile(r"\b(sell|put)\b", re.IGNORECASE)
+_BUY_RE = re.compile(r"\b(buy|call|higher|up)\b", re.IGNORECASE)
+_SELL_RE = re.compile(r"\b(sell|put|lower|down)\b", re.IGNORECASE)
+_TZ_RE = re.compile(r"utc\s*([+-]?\s?\d{1,2})(?::?(\d{2}))?", re.IGNORECASE)
+
+# Emoji fallback: only used when no BUY/SELL-style word is found anywhere.
+_UP_EMOJI = ("🟩", "⬆️", "🔺", "📈")
+_DOWN_EMOJI = ("🟥", "⬇️", "🔻", "📉")
 
 # Words that legitimately appear as 6 consecutive uppercase letters but are
 # NOT currency pairs -- filtered out of the smashed-pair guess.
@@ -101,16 +110,34 @@ def _find_direction(text: str) -> str | None:
     if buy and sell:
         # Whichever keyword appears first in the message wins.
         return "call" if buy.start() < sell.start() else "put"
+
+    # No BUY/SELL-style word anywhere -- fall back to color/arrow emoji,
+    # common in channels that only signal direction visually.
+    up_pos = min((text.find(e) for e in _UP_EMOJI if e in text), default=-1)
+    down_pos = min((text.find(e) for e in _DOWN_EMOJI if e in text), default=-1)
+    if up_pos != -1 and (down_pos == -1 or up_pos < down_pos):
+        return "call"
+    if down_pos != -1:
+        return "put"
     return None
 
 
+def _find_utc_offset(text: str) -> float | None:
+    """Looks for an explicit stated zone like 'UTC -3' or 'UTC+2:30'."""
+    m = _TZ_RE.search(text)
+    if not m:
+        return None
+    hours = float(m.group(1).replace(" ", ""))
+    minutes = int(m.group(2)) if m.group(2) else 0
+    sign = -1 if hours < 0 else 1
+    return hours + sign * (minutes / 60)
+
+
 def _find_expiration_minutes(text: str) -> int | None:
-    m = _EXPIRY_RE_1.search(text)
-    if m:
-        return int(m.group(1))
-    m = _EXPIRY_RE_2.search(text)
-    if m:
-        return int(m.group(1))
+    for pattern in (_EXPIRY_RE_1, _EXPIRY_RE_2, _EXPIRY_RE_3, _EXPIRY_RE_4):
+        m = pattern.search(text)
+        if m:
+            return int(m.group(1))
     return None
 
 
@@ -159,10 +186,21 @@ def parse_signal(raw_text: str) -> ParsedSignal:
         sig.entry_time = _find_entry_time(text, all_times)
         sig.martingale_times = _find_martingale_times(all_times, sig.entry_time)
         sig.martingale_count = _find_gale_count(text)
+        sig.utc_offset_hours = _find_utc_offset(text)
+
+        # No time of any kind found anywhere in the message -> this is a
+        # "trade it right now" signal rather than a scheduled one.
+        if sig.entry_time is None and not all_times:
+            sig.immediate = True
 
         # If we only got a count (e.g. "up to 2 Gale's") with no explicit
         # times, derive them: convention is one expiration-cycle apart.
-        if not sig.martingale_times and sig.martingale_count and sig.entry_time and sig.expiration_minutes:
+        if (
+            not sig.martingale_times
+            and sig.martingale_count
+            and sig.entry_time
+            and sig.expiration_minutes
+        ):
             h, m = map(int, sig.entry_time.split(":"))
             base_minutes = h * 60 + m
             derived = []
@@ -171,14 +209,19 @@ def parse_signal(raw_text: str) -> ParsedSignal:
                 derived.append(f"{t // 60:02d}:{t % 60:02d}")
             sig.martingale_times = derived
 
-        sig.is_valid = bool(sig.asset and sig.direction and sig.entry_time and sig.expiration_minutes)
+        sig.is_valid = bool(
+            sig.asset
+            and sig.direction
+            and sig.expiration_minutes
+            and (sig.entry_time or sig.immediate)
+        )
         if not sig.is_valid:
             missing = [
                 name
                 for name, val in (
                     ("asset", sig.asset),
                     ("direction", sig.direction),
-                    ("entry_time", sig.entry_time),
+                    ("entry_time or immediate", sig.entry_time or sig.immediate),
                     ("expiration_minutes", sig.expiration_minutes),
                 )
                 if not val

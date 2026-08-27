@@ -34,10 +34,9 @@ class StaleSignalError(Exception):
     pass
 
 
-def _seconds_until(hhmm: str) -> float:
-    """Seconds from now until HH:MM, interpreting HH:MM in the channel's
-    stated timezone (config.trading_cfg.signal_utc_offset_hours from UTC),
-    converted to this machine's local time.
+def _seconds_until(hhmm: str, utc_offset_hours: float) -> float:
+    """Seconds from now until HH:MM, interpreting HH:MM in the given UTC
+    offset, converted to this machine's local time.
 
     Raises StaleSignalError if the computed wait is absurdly long, which
     almost always means a timezone mismatch or a bug, not a real signal.
@@ -48,7 +47,7 @@ def _seconds_until(hhmm: str) -> float:
     # HH:MM is in "signal time" (UTC + offset). Convert to UTC by
     # subtracting the offset.
     target_utc = now_utc.replace(hour=h, minute=m, second=0, microsecond=0)
-    target_utc -= timedelta(hours=trading_cfg.signal_utc_offset_hours)
+    target_utc -= timedelta(hours=utc_offset_hours)
 
     if target_utc < now_utc - timedelta(seconds=_GRACE_SECONDS):
         target_utc += timedelta(days=1)
@@ -83,21 +82,39 @@ async def run_signal(
     entry_points = [signal.entry_time, *signal.martingale_times]
     expiration_seconds = signal.expiration_minutes * 60
 
+    # Prefer the timezone the signal itself stated (e.g. "UTC -3" found in
+    # the message text); fall back to the .env default if none was found.
+    effective_offset = (
+        signal.utc_offset_hours
+        if signal.utc_offset_hours is not None
+        else trading_cfg.signal_utc_offset_hours
+    )
+    logger.info(
+        "Using UTC offset %.2fh for %s (%s)",
+        effective_offset, signal.asset,
+        "detected in message" if signal.utc_offset_hours is not None else "from .env default",
+    )
+
     for level, entry_time in enumerate(entry_points):
         stake = seq.next_stake()
         if stake is None:
             break
 
-        try:
-            wait_s = _seconds_until(entry_time)
-        except StaleSignalError as exc:
-            logger.error("Skipping signal for %s: %s", signal.asset, exc)
-            return
+        if entry_time is None:
+            # signal.immediate case: no clock time given anywhere -> enter now.
+            wait_s = 0.0
+            logger.info("Level %d for %s: immediate signal, entering now, stake=%.2f", level, signal.asset, stake)
+        else:
+            try:
+                wait_s = _seconds_until(entry_time, effective_offset)
+            except StaleSignalError as exc:
+                logger.error("Skipping signal for %s: %s", signal.asset, exc)
+                return
+            logger.info(
+                "Level %d for %s: waiting %.0fs until %s, stake=%.2f",
+                level, signal.asset, wait_s, entry_time, stake,
+            )
 
-        logger.info(
-            "Level %d for %s: waiting %.0fs until %s, stake=%.2f",
-            level, signal.asset, wait_s, entry_time, stake,
-        )
         await asyncio.sleep(wait_s)
 
         if not risk_guard.trading_allowed():
