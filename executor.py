@@ -21,6 +21,7 @@ from martingale import DailyRiskGuard, MartingaleConfig, MartingaleSequence
 from po_client import AssetNotSupportedError, PocketOptionExecutor
 from signal_parser import ParsedSignal
 from config import trading_cfg
+from state import state
 
 logger = logging.getLogger("executor")
 
@@ -74,12 +75,25 @@ async def run_signal(
         logger.warning("Skipping unparseable signal: %s", signal.error)
         return
 
+    state.push_event(
+        "signal_detected",
+        f"Signal detected: {signal.asset} {signal.direction} "
+        f"({'martingale x' + str(len(signal.martingale_times)) if signal.has_martingale else 'single trade'})",
+        asset=signal.asset, direction=signal.direction, has_martingale=signal.has_martingale,
+    )
+
     if not risk_guard.trading_allowed():
         logger.warning("Daily loss cap hit -- skipping signal for %s", signal.asset)
+        state.push_event("skipped", f"Skipped {signal.asset}: daily loss cap reached")
         return
 
     seq = MartingaleSequence(martingale_cfg)
-    entry_points = [signal.entry_time, *signal.martingale_times]
+    # Only extend into martingale levels if the signal itself declared them.
+    # (Belt-and-suspenders: signal_parser already guarantees martingale_times
+    # is empty unless has_martingale is True, but the executor shouldn't
+    # silently trust that invariant holds forever -- a bug there should
+    # mean "no extra trades", not "extra trades by accident".)
+    entry_points = [signal.entry_time] if not signal.has_martingale else [signal.entry_time, *signal.martingale_times]
     expiration_seconds = signal.expiration_minutes * 60
 
     # Prefer the timezone the signal itself stated (e.g. "UTC -3" found in
@@ -139,9 +153,16 @@ async def run_signal(
             break
 
     risk_guard.register(seq.total_pnl)
+    state.daily_pnl = risk_guard.realized_pnl
     await po.refresh_balance()
 
     logger.info(
         "Sequence done for %s: won=%s levels_used=%d total_staked=%.2f pnl=%.2f new_balance=%s",
         signal.asset, seq.won, seq.level, seq.total_staked, seq.total_pnl, po.balance,
+    )
+    state.push_event(
+        "sequence_done",
+        f"{signal.asset}: {'WON' if seq.won else 'LOST'} after {seq.level + 1} level(s), "
+        f"pnl {seq.total_pnl:+.2f}",
+        asset=signal.asset, won=seq.won, pnl=seq.total_pnl,
     )

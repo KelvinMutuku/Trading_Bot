@@ -1,3 +1,5 @@
 telethon>=1.36
 pocket-option>=0.4.0
 python-dotenv>=1.0
+fastapi>=0.115
+uvicorn[standard]>=0.32
