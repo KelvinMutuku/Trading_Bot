@@ -1,4 +1,3 @@
-
 # Telegram → Pocket Option Signal Bot
 
 Reads trading signals from Telegram channels you choose, executes them on
@@ -154,30 +153,6 @@ docker run -d --name signal-bot --env-file .env --restart unless-stopped \
 
 The two volume mounts persist your Telegram login session and channel
 selection across container restarts/rebuilds.
-
-## Troubleshooting
-
-**`aiodns.error.DNSError: Could not contact DNS servers` on Windows.**
-This happens because `aiodns` (pulled in as a dependency of `aiohttp`)
-frequently can't read Windows' DNS configuration correctly. It can come
-back after any `pip install -r requirements.txt` that recreates or updates
-your venv — including just adding the dashboard's `fastapi`/`uvicorn`
-dependencies. Fix: `pip uninstall aiodns` (answer y), then re-run. If it
-resurfaces after a future `pip install -r requirements.txt`, just uninstall
-it again — it's safe to remove; aiohttp falls back to its built-in resolver
-without it.
-
-**Can't reach the dashboard in a browser.** First check whether `main.py`
-actually got past connecting to Pocket Option — if that connection fails
-(e.g. the DNS error above, or an expired `PO_SESSION`), the whole process
-crashes before the dashboard server ever starts, so there's no page to
-load regardless of URL or firewall settings. Look for `Dashboard available at http://...` in your console output; if you don't see it, fix whatever
-crashed first. If you do see it but still can't load the page: confirm
-`DASHBOARD_HOST=0.0.0.0` in `.env` if accessing from another machine
-(`127.0.0.1` only works locally on the same machine), confirm the port
-(default `8080`) is open in your VPS's firewall/security group (e.g.
-`sudo ufw allow 8080`), and confirm you're using `http://`, not `https://`
-(there's no TLS by default).
 
 ## Project layout
 

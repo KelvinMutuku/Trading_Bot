@@ -53,18 +53,6 @@ class TradingConfig:
     # something is misconfigured (timezone, stale signal) -- skip instead
     # of silently sleeping for hours.
     max_entry_wait_seconds: int = int(os.getenv("MAX_ENTRY_WAIT_SECONDS", "3600"))
-    # Some channels split one signal across multiple messages (e.g. asset
-    # posted first, direction posted a minute or two later). If a message
-    # fails to parse on its own, the bot tries combining it with the
-    # previous unresolved message from the same channel, as long as it
-    # arrived within this many seconds.
-    multi_message_window_seconds: int = int(os.getenv("MULTI_MESSAGE_WINDOW_SECONDS", "180"))
-
-
-@dataclass
-class DashboardConfig:
-    host: str = os.getenv("DASHBOARD_HOST", "0.0.0.0")
-    port: int = int(os.getenv("DASHBOARD_PORT", "8080"))
 
 
 def load_selected_channels() -> list[int]:
@@ -81,4 +69,3 @@ def save_selected_channels(channel_ids: list[int]) -> None:
 telegram_cfg = TelegramConfig()
 pocket_option_cfg = PocketOptionConfig()
 trading_cfg = TradingConfig()
-dashboard_cfg = DashboardConfig()
