@@ -25,7 +25,6 @@ from pocket_option.contrib.default_init import default_init
 from pocket_option.models import Asset, AuthorizationData, DealAction
 
 from config import pocket_option_cfg
-from state import state
 
 logger = logging.getLogger("po_client")
 
@@ -96,20 +95,16 @@ class PocketOptionExecutor:
         async def _on_auth(data):
             logger.info("Pocket Option authorized")
             self._ready.set()
-            state.connected = True
-            state.push_event("connection", "Connected to Pocket Option")
             await self.refresh_balance()
 
         @self.client.on.balance_success_update
         async def _on_balance(data):
             raw = getattr(data, "balance", None) or getattr(data, "value", None)
             # Pocket Option returns balance as a Decimal for precision;
-            # convert to float here so nothing downstream (dashboard JSON,
-            # logging, arithmetic) has to think about it.
+            # convert to float here so nothing downstream (logging,
+            # arithmetic) has to think about it.
             self._balance = float(raw) if raw is not None else None
             logger.info("Balance updated: %s", self._balance)
-            state.balance = self._balance
-            state.push_event("balance", f"Balance updated: {self._balance}")
 
         region = Regions.DEMO if pocket_option_cfg.is_demo else Regions.REAL
         await self.client.connect(region)
@@ -138,11 +133,6 @@ class PocketOptionExecutor:
         action = DealAction.CALL if direction == "call" else DealAction.PUT
 
         logger.info("Opening %s %s amount=%s exp=%ss", asset, action, amount, expiration_seconds)
-        state.push_event(
-            "trade_opened",
-            f"{normalized_asset} {direction.upper()} — stake {amount}",
-            asset=normalized_asset, direction=direction, amount=amount,
-        )
         deal = await self.client.deals.open_deal(
             asset=asset,
             amount=amount,
@@ -163,11 +153,6 @@ class PocketOptionExecutor:
         profit = float(profit) if profit is not None else None
         won = (profit is not None and profit > 0)
         logger.info("Deal result: won=%s profit=%s", won, profit)
-        state.push_event(
-            "trade_result",
-            f"Trade {'WON' if won else 'LOST'} (profit {profit})",
-            won=won, profit=profit,
-        )
         return won
 
     async def refresh_balance(self) -> float | None:

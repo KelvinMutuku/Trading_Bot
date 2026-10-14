@@ -20,10 +20,9 @@ your account balance after each sequence completes.
   suggests.
 - Test everything with `PO_IS_DEMO=1` (demo account) before ever pointing
   this at a real-money account.
-- Signal channels that push affiliate/referral links (as yours do) are
-  monetizing broker sign-ups. That doesn't necessarily mean the signals are
-  bad, but it's a reason to track their actual win rate yourself rather
-  than assume it.
+- Signal channels that push affiliate/referral links are monetizing broker
+  sign-ups. That doesn't necessarily mean the signals are bad, but it's a
+  reason to track their actual win rate yourself rather than assume it.
 
 ## 1. Install
 
@@ -60,8 +59,8 @@ The unofficial API authenticates with a session token pulled from your
 browser, not your username/password:
 
 1. Log into Pocket Option in Chrome/Firefox.
-2. Open DevTools → **Network** tab → filter by **WS** (WebSocket).
-3. Click the live WebSocket connection, look at the messages, and find one
+2. Open DevTools → **Network** tab → filter by **Socket** (WebSocket).
+3. Click the live WebSocket connection → **Messages** tab, and find a frame
    starting with `42["auth",{"session":"...","uid":...`.
 4. Copy the `session` string into `PO_SESSION` and the `uid` number into
    `PO_UID` in `.env`.
@@ -73,13 +72,16 @@ failing to authenticate, redo this step.
 
 Edit `.env`:
 
-| Variable                  | Meaning                                                                 |
-| ------------------------- | ----------------------------------------------------------------------- |
-| `STARTING_STAKE`        | Stake for level 0 (the initial entry)                                   |
-| `MARTINGALE_MULTIPLIER` | Stake multiplier applied after each loss                                |
-| `MAX_MARTINGALE_LEVEL`  | Hard cap on levels, regardless of what a signal lists                   |
-| `MAX_DAILY_LOSS`        | Bot stops opening new sequences once today's realized loss exceeds this |
-| `PO_IS_DEMO`            | `1` = demo account, `0` = real money                                |
+| Variable                         | Meaning                                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `STARTING_STAKE`               | Stake for level 0 (the initial entry)                                                       |
+| `MARTINGALE_MULTIPLIER`        | Stake multiplier applied after each loss                                                    |
+| `MAX_MARTINGALE_LEVEL`         | Hard cap on levels, regardless of what a signal lists                                       |
+| `MAX_DAILY_LOSS`               | Bot stops opening new sequences once today's realized loss exceeds this                     |
+| `PO_IS_DEMO`                   | `1` = demo account, `0` = real money                                                    |
+| `SIGNAL_UTC_OFFSET_HOURS`      | Fallback timezone offset for signals that don't state their own zone                        |
+| `MAX_ENTRY_WAIT_SECONDS`       | Safety cap: skip (don't sleep for hours on) a signal with a suspiciously distant entry time |
+| `MULTI_MESSAGE_WINDOW_SECONDS` | How long to wait for the second half of a signal split across messages                      |
 
 ## 6. Run it
 
@@ -153,6 +155,17 @@ docker run -d --name signal-bot --env-file .env --restart unless-stopped \
 
 The two volume mounts persist your Telegram login session and channel
 selection across container restarts/rebuilds.
+
+## Troubleshooting
+
+**`aiodns.error.DNSError: Could not contact DNS servers` on Windows.**
+This happens because `aiodns` (pulled in as a dependency of `aiohttp`)
+frequently can't read Windows' DNS configuration correctly. It can come
+back after any `pip install -r requirements.txt` that recreates or updates
+your venv. Fix: `pip uninstall aiodns` (answer y), then re-run. If it
+resurfaces after a future `pip install -r requirements.txt`, just uninstall
+it again — it's safe to remove; aiohttp falls back to its built-in resolver
+without it.
 
 ## Project layout
 
