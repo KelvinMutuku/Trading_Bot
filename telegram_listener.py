@@ -13,9 +13,8 @@ from datetime import datetime, timezone, timedelta
 
 from telethon import TelegramClient, events
 
-from config import load_selected_channels, save_selected_channels, telegram_cfg, trading_cfg
+from config import load_selected_channels, telegram_cfg, trading_cfg
 from signal_parser import parse_signal
-from state import state, ChannelInfo
 
 logger = logging.getLogger("telegram_listener")
 
@@ -116,39 +115,15 @@ class TelegramSignalListener:
             telegram_cfg.session_name, telegram_cfg.api_id, telegram_cfg.api_hash
         )
         self.on_signal_callback = on_signal_callback
-        self.selected_channel_ids: set[int] = set(load_selected_channels())
-
-    def update_selected_channels(self, channel_ids: list[int]) -> None:
-        """Called from the web dashboard. Takes effect immediately -- the
-        live message handler checks this set on every message rather than
-        being registered against a fixed list, so no restart is needed."""
-        self.selected_channel_ids = set(channel_ids)
-        save_selected_channels(channel_ids)
-        for c in state.channels:
-            c.selected = c.id in self.selected_channel_ids
-        state.push_event("channels_updated", f"Monitoring {len(channel_ids)} channel(s)")
-        logger.info("Selected channels updated: %s", channel_ids)
-
-    async def _load_available_channels(self) -> None:
-        from telethon.tl.types import Channel
-
-        dialogs = await self.client.get_dialogs()
-        channels = [d for d in dialogs if isinstance(d.entity, Channel)]
-        state.channels = [
-            ChannelInfo(id=d.entity.id, name=d.name, selected=d.entity.id in self.selected_channel_ids)
-            for d in channels
-        ]
-        logger.info("Loaded %d available channel(s) for the dashboard.", len(state.channels))
 
     async def start(self):
-        await self.client.start()
-        await self._load_available_channels()
-
-        if not self.selected_channel_ids:
-            logger.warning(
-                "No channels selected yet. Pick some from the dashboard, "
-                "or run `python setup_channels.py`. Waiting..."
+        channel_ids = load_selected_channels()
+        if not channel_ids:
+            raise RuntimeError(
+                "No channels selected. Run `python setup_channels.py` first."
             )
+
+        await self.client.start()
 
         buffer = PendingMessageBuffer(trading_cfg.multi_message_window_seconds)
 
@@ -157,7 +132,7 @@ class TelegramSignalListener:
         executed_signal_signatures = set()
 
         # Catch up on missed signals first
-        for channel_id in list(self.selected_channel_ids):
+        for channel_id in channel_ids:
             logger.info("Checking for unexecuted signals in channel %s...", channel_id)
             try:
                 # Fetch recent history, then process oldest-first so
@@ -182,15 +157,9 @@ class TelegramSignalListener:
             except Exception as e:
                 logger.error("Failed to fetch history for %s: %s", channel_id, e)
 
-        # Listen for live signals across ALL channels the account belongs to
-        # -- filtering happens inside the handler against the *current*
-        # self.selected_channel_ids, so toggling channels on the dashboard
-        # takes effect immediately without re-registering this handler.
-        @self.client.on(events.NewMessage())
+        # Listen for live signals
+        @self.client.on(events.NewMessage(chats=channel_ids))
         async def _handler(event):
-            if event.chat_id not in self.selected_channel_ids:
-                return
-
             processed_message_ids.add(event.message.id)
             text = event.raw_text or ""
             signal = buffer.resolve(event.chat_id, text, event.message.date)
@@ -208,5 +177,5 @@ class TelegramSignalListener:
                 else:
                     logger.info("Live signal ignored due to timeframe rules.")
 
-        logger.info("Listening on %d channel(s)...", len(self.selected_channel_ids))
+        logger.info("Listening on %d channel(s)...", len(channel_ids))
         await self.client.run_until_disconnected()

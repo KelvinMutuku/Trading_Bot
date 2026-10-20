@@ -127,6 +127,7 @@ _EXPIRY_RE_1 = re.compile(r"exp(?:ir\w*)?\s*:?\s*(\d+)\s*m\b", re.IGNORECASE)
 _EXPIRY_RE_2 = re.compile(r"\(m(\d+)\)", re.IGNORECASE)
 _EXPIRY_RE_3 = re.compile(r"\b(\d{1,3})\s*minutes?\b", re.IGNORECASE)   # "15 minutes", no label
 _EXPIRY_RE_4 = re.compile(r"\bm(\d{1,3})\b", re.IGNORECASE)             # bare "M2", no parens/label
+_EXPIRY_RE_5 = re.compile(r"\b(\d{1,3})\s*min\b", re.IGNORECASE)        # "3 min" / "1 MIN" abbreviation
 _ENTRY_RE = re.compile(r"entry\w*\s*(?:at)?:?\s*([01]?\d|2[0-3]):([0-5]\d)", re.IGNORECASE)
 _GALE_COUNT_RE = re.compile(r"(\d+)\s*gale", re.IGNORECASE)
 _BUY_RE = re.compile(r"\b(buy|call|higher|up)\b", re.IGNORECASE)
@@ -202,7 +203,7 @@ def _find_utc_offset(text: str) -> float | None:
 
 
 def _find_expiration_minutes(text: str) -> int | None:
-    for pattern in (_EXPIRY_RE_1, _EXPIRY_RE_2, _EXPIRY_RE_3, _EXPIRY_RE_4):
+    for pattern in (_EXPIRY_RE_1, _EXPIRY_RE_2, _EXPIRY_RE_3, _EXPIRY_RE_4, _EXPIRY_RE_5):
         m = pattern.search(text)
         if m:
             return int(m.group(1))

@@ -61,12 +61,6 @@ class TradingConfig:
     multi_message_window_seconds: int = int(os.getenv("MULTI_MESSAGE_WINDOW_SECONDS", "180"))
 
 
-@dataclass
-class DashboardConfig:
-    host: str = os.getenv("DASHBOARD_HOST", "0.0.0.0")
-    port: int = int(os.getenv("DASHBOARD_PORT", "8080"))
-
-
 def load_selected_channels() -> list[int]:
     """Channel IDs the user picked via the setup CLI (setup_channels.py)."""
     if not SELECTED_CHANNELS_FILE.exists():
@@ -81,4 +75,3 @@ def save_selected_channels(channel_ids: list[int]) -> None:
 telegram_cfg = TelegramConfig()
 pocket_option_cfg = PocketOptionConfig()
 trading_cfg = TradingConfig()
-dashboard_cfg = DashboardConfig()
