@@ -72,16 +72,16 @@ failing to authenticate, redo this step.
 
 Edit `.env`:
 
-| Variable                         | Meaning                                                                                     |
-| -------------------------------- | ------------------------------------------------------------------------------------------- |
-| `STARTING_STAKE`               | Stake for level 0 (the initial entry)                                                       |
-| `MARTINGALE_MULTIPLIER`        | Stake multiplier applied after each loss                                                    |
-| `MAX_MARTINGALE_LEVEL`         | Hard cap on levels, regardless of what a signal lists                                       |
-| `MAX_DAILY_LOSS`               | Bot stops opening new sequences once today's realized loss exceeds this                     |
-| `PO_IS_DEMO`                   | `1` = demo account, `0` = real money                                                    |
-| `SIGNAL_UTC_OFFSET_HOURS`      | Fallback timezone offset for signals that don't state their own zone                        |
+| Variable                       | Meaning                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| `STARTING_STAKE`               | Stake for level 0 (the initial entry)                                   |
+| `MARTINGALE_MULTIPLIER`        | Stake multiplier applied after each loss                                |
+| `MAX_MARTINGALE_LEVEL`         | Hard cap on levels, regardless of what a signal lists                   |
+| `MAX_DAILY_LOSS`               | Bot stops opening new sequences once today's realized loss exceeds this |
+| `PO_IS_DEMO`                   | `1` = demo account, `0` = real money                                    |
+| `SIGNAL_UTC_OFFSET_HOURS`      | Last-resort timezone offset, used only when neither the signal nor its channel specifies one (see "Timezones") |
 | `MAX_ENTRY_WAIT_SECONDS`       | Safety cap: skip (don't sleep for hours on) a signal with a suspiciously distant entry time |
-| `MULTI_MESSAGE_WINDOW_SECONDS` | How long to wait for the second half of a signal split across messages                      |
+| `MULTI_MESSAGE_WINDOW_SECONDS` | How long to wait for the second half of a signal split across messages  |
 
 ## 6. Run it
 
@@ -92,6 +92,29 @@ python main.py
 It connects to Pocket Option, then listens on your selected channels. Each
 valid signal spawns its own martingale sequence as a background task, so
 overlapping signals from different channels don't block each other.
+
+## Timezones: per-channel offsets
+
+Many channels write entry times like `Entry at 08:20` in their own clock
+without saying which timezone it is, and different channels use different
+clocks. The bot decides which offset to use in this order:
+
+1. **A zone written in the signal** (`Time Zone: UTC -3`): always wins.
+2. **The channel's own setting**: set in `python setup_channels.py`, which
+   asks for each channel you pick (`0` = UTC, `-3` = UTC-3, `4` = UTC+4,
+   half-hours like `5.5` work). It's stored in `channel_offsets.json`, which
+   you can also edit by hand; changes apply to the next signal, no restart.
+3. **`SIGNAL_UTC_OFFSET_HOURS` in `.env`**: the last-resort default.
+
+The log shows which one was used (`Using UTC offset ... (per-channel
+setting)`). The server's own timezone never matters; the bot works in UTC.
+
+**Finding a channel's offset:** note when a signal was posted (Telegram shows
+your local time; convert it to UTC) and compare with its entry time, which is
+usually 3 to 6 minutes later. Posted 08:15 UTC with `Entry at 08:20` means
+offset `0`. Posted 12:16 UTC with `Entry at 08:20` means offset `-4`. A skip
+message like `Wait time 14662s is outside the 10-minute window` is the same
+clue: 14662s is about 4 hours, i.e. the offset is about 4 hours off.
 
 ## Running it automatically (recommended: small VPS)
 
@@ -175,7 +198,7 @@ martingale.py         Stake sizing + daily loss cap logic
 po_client.py           Pocket Option connection + trade placement/results
 telegram_listener.py  Telethon client, listens on selected channels
 executor.py            Runs one signal's full martingale sequence
-setup_channels.py      One-time CLI to pick which channels to monitor
+setup_channels.py      CLI to pick channels and set each channel's timezone offset
 main.py                 Wires it all together
 ```
 

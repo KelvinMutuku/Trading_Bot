@@ -103,7 +103,7 @@ async def run_signal(
     logger.info(
         "Using UTC offset %.2fh for %s (%s)",
         effective_offset, signal.asset,
-        "detected in message" if signal.utc_offset_hours is not None else "from .env default",
+        {"message": "stated in the message", "channel": "per-channel setting"}.get(signal.offset_source, ".env default"),
     )
 
     for level, entry_time in enumerate(entry_points):

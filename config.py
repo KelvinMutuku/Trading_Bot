@@ -19,6 +19,7 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 SELECTED_CHANNELS_FILE = BASE_DIR / "selected_channels.json"
+CHANNEL_OFFSETS_FILE = BASE_DIR / "channel_offsets.json"
 
 
 @dataclass
@@ -70,6 +71,39 @@ def load_selected_channels() -> list[int]:
 
 def save_selected_channels(channel_ids: list[int]) -> None:
     SELECTED_CHANNELS_FILE.write_text(json.dumps({"channel_ids": channel_ids}, indent=2))
+
+
+def bare_channel_id(chat_id: int) -> int:
+    """Telethon reports channels two ways: the bare id (1765226347, what
+    setup_channels.py saves) and the 'marked' id (-1001765226347, what live
+    events carry). Both mean the same channel; this returns the bare form."""
+    digits = str(abs(int(chat_id)))
+    if len(digits) >= 13 and digits.startswith("100"):
+        return int(digits[3:])
+    return int(digits)
+
+
+def load_channel_offsets() -> dict[int, float]:
+    """Per-channel UTC offset (hours) for signals that don't state their own
+    timezone. Maps bare channel id -> offset. A missing/unreadable file or a
+    bad entry just means 'no override' -- it never stops the bot."""
+    try:
+        raw = json.loads(CHANNEL_OFFSETS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    offsets: dict[int, float] = {}
+    for key, value in (raw.items() if isinstance(raw, dict) else []):
+        try:
+            offsets[bare_channel_id(int(key))] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return offsets
+
+
+def save_channel_offsets(offsets: dict[int, float]) -> None:
+    CHANNEL_OFFSETS_FILE.write_text(
+        json.dumps({str(k): v for k, v in sorted(offsets.items())}, indent=2)
+    )
 
 
 telegram_cfg = TelegramConfig()

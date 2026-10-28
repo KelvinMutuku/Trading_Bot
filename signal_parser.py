@@ -57,7 +57,8 @@ class ParsedSignal:
     expiration_minutes: int | None = None
     martingale_times: list[str] = field(default_factory=list)
     martingale_count: int = 0
-    utc_offset_hours: float | None = None  # detected from message text, e.g. "UTC -3" -> -3.0
+    utc_offset_hours: float | None = None  # from the message ("UTC -3" -> -3.0) or, failing that, the channel's setting
+    offset_source: str | None = None       # "message", "channel", or None (= use the .env default)
     immediate: bool = False                # True if the signal has no entry time at all -> trade now
     has_martingale: bool = False           # True only if the signal itself specified martingale levels/count
     is_valid: bool = False
@@ -256,6 +257,8 @@ def parse_signal(raw_text: str) -> ParsedSignal:
         sig.martingale_times = _find_martingale_times(all_times, sig.entry_time)
         sig.martingale_count = _find_gale_count(text)
         sig.utc_offset_hours = _find_utc_offset(text)
+        if sig.utc_offset_hours is not None:
+            sig.offset_source = "message"
 
         # Only trust martingale/reinforcement data if the message actually
         # says so. Without this, a coincidental extra time elsewhere in the

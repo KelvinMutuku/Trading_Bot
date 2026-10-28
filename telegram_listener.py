@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 
 from telethon import TelegramClient, events
 
-from config import load_selected_channels, telegram_cfg, trading_cfg
+from config import bare_channel_id, load_channel_offsets, load_selected_channels, telegram_cfg, trading_cfg
 from signal_parser import parse_signal
 
 logger = logging.getLogger("telegram_listener")
@@ -70,6 +70,22 @@ def get_signal_signature(signal, message_date: datetime) -> str:
     exp_key = str(signal.expiration_minutes or 0)
     
     return f"{date_key}:{asset_key}:{direction_key}:{entry_key}:{exp_key}".upper()
+
+
+
+def apply_channel_offset(signal, chat_id: int) -> None:
+    """Gives the signal its channel's UTC offset -- but only if the message
+    didn't state its own timezone (a zone written in the message always wins).
+    Precedence: message > per-channel setting > SIGNAL_UTC_OFFSET_HOURS.
+    The file is re-read here, so you can edit channel_offsets.json without
+    restarting the bot."""
+    if signal.utc_offset_hours is not None:
+        return
+    offset = load_channel_offsets().get(bare_channel_id(chat_id))
+    if offset is not None:
+        signal.utc_offset_hours = offset
+        signal.offset_source = "channel"
+        logger.info("Using the per-channel UTC offset %+g for channel %s", offset, bare_channel_id(chat_id))
 
 
 def should_execute_signal(signal, message_date: datetime) -> bool:
@@ -145,6 +161,8 @@ class TelegramSignalListener:
                     processed_message_ids.add(message.id)
 
                     signal = buffer.resolve(channel_id, message.text, message.date)
+                    if signal:
+                        apply_channel_offset(signal, channel_id)
                     if signal and should_execute_signal(signal, message.date):
                         sig_id = get_signal_signature(signal, message.date)
                         if sig_id in executed_signal_signatures:
@@ -163,6 +181,8 @@ class TelegramSignalListener:
             processed_message_ids.add(event.message.id)
             text = event.raw_text or ""
             signal = buffer.resolve(event.chat_id, text, event.message.date)
+            if signal:
+                apply_channel_offset(signal, event.chat_id)
 
             if signal:
                 if should_execute_signal(signal, event.message.date):
