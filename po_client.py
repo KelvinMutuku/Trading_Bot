@@ -127,12 +127,12 @@ class PocketOptionExecutor:
                 "po_client.py mapping the signal's spelling to the real one."
             ) from exc
 
-    async def place_trade(self, normalized_asset: str, direction: str, amount: float, expiration_seconds: int):
+    async def place_trade(self, normalized_asset: str, direction: str, amount: float, expiration_seconds: int, tag: str = ""):
         """direction: 'call' or 'put'. Returns the opened deal object."""
         asset = self._resolve_asset(normalized_asset)
         action = DealAction.CALL if direction == "call" else DealAction.PUT
 
-        logger.info("Opening %s %s amount=%s exp=%ss", asset, action, amount, expiration_seconds)
+        logger.info("%sOpening %s %s amount=%s exp=%ss", tag, asset, action, amount, expiration_seconds)
         deal = await self.client.deals.open_deal(
             asset=asset,
             amount=amount,
@@ -143,7 +143,7 @@ class PocketOptionExecutor:
         )
         return deal
 
-    async def wait_for_result(self, deal, expiration_seconds: int) -> bool:
+    async def wait_for_result(self, deal, expiration_seconds: int, tag: str = "") -> bool:
         """Blocks until the deal closes. Returns True if it won."""
         result = await self.client.deals.check_deal_result(
             wait_time=expiration_seconds + 5,
@@ -152,7 +152,7 @@ class PocketOptionExecutor:
         profit = getattr(result, "profit", None)
         profit = float(profit) if profit is not None else None
         won = (profit is not None and profit > 0)
-        logger.info("Deal result: won=%s profit=%s", won, profit)
+        logger.info("%sDeal result: won=%s profit=%s", tag, won, profit)
         return won
 
     async def refresh_balance(self) -> float | None:

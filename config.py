@@ -13,9 +13,52 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
-load_dotenv()
+
+
+def _load_env_file() -> dict:
+    """Loads .env from THIS folder (not whatever folder the bot was started
+    from) and makes it authoritative: a value in .env beats a same-named
+    variable that happens to be set on the machine. Without this, a stray
+    Windows environment variable (e.g. STARTING_STAKE=1000) silently wins and
+    .env looks like it's being ignored. Everything it finds is recorded in
+    ENV_REPORT so main.py can print it at startup."""
+    path = Path(__file__).resolve().parent / ".env"
+    report = {"path": str(path), "found": path.exists(), "conflicts": [], "hint": None, "encoding": "utf-8-sig"}
+
+    if not report["found"]:
+        folder = path.parent
+        for name in (".env.txt", "env.txt", "env"):
+            if (folder / name).exists():
+                report["hint"] = (
+                    f"found '{name}' but the file must be named exactly '.env' "
+                    "(Windows hides '.txt' extensions: turn on View > Show > File name extensions, then rename it)."
+                )
+                break
+        else:
+            if (folder / ".env.example").exists():
+                report["hint"] = "only .env.example exists: copy it to a file named '.env' and fill it in."
+            else:
+                report["hint"] = "no .env file here, so built-in defaults are in use."
+        return report
+
+    # Files saved by PowerShell redirection or some editors are UTF-16, which
+    # reads as garbage; UTF-8 files may start with an invisible BOM.
+    head = path.read_bytes()[:2]
+    if head in (b"\xff\xfe", b"\xfe\xff"):
+        report["encoding"] = "utf-16"
+
+    values = dotenv_values(path, encoding=report["encoding"])
+    for key, file_value in values.items():
+        current = os.environ.get(key)
+        if file_value is not None and current is not None and current != file_value:
+            report["conflicts"].append((key, current, file_value))
+    load_dotenv(path, override=True, encoding=report["encoding"])
+    return report
+
+
+ENV_REPORT = _load_env_file()
 
 BASE_DIR = Path(__file__).resolve().parent
 SELECTED_CHANNELS_FILE = BASE_DIR / "selected_channels.json"
@@ -109,3 +152,26 @@ def save_channel_offsets(offsets: dict[int, float]) -> None:
 telegram_cfg = TelegramConfig()
 pocket_option_cfg = PocketOptionConfig()
 trading_cfg = TradingConfig()
+
+
+def describe_settings() -> list[str]:
+    """Human-readable lines main.py prints at startup, so it's always clear
+    which folder and which .env the running bot is actually using."""
+    r = ENV_REPORT
+    lines = [f"Bot folder: {Path(__file__).resolve().parent}"]
+    if r["found"]:
+        lines.append(f".env loaded from: {r['path']}")
+    else:
+        lines.append(f"NO .env LOADED: {r['hint']}")
+    for key, current, file_value in r["conflicts"]:
+        lines.append(
+            f"WARNING: the machine has an environment variable {key}={current!r} that disagrees with "
+            f".env ({file_value!r}). Using the .env value; consider deleting the machine-level variable."
+        )
+    lines.append(
+        f"Stake settings: starting={trading_cfg.starting_stake:g} multiplier={trading_cfg.martingale_multiplier:g} "
+        f"max martingale level={trading_cfg.max_martingale_level} max daily loss={trading_cfg.max_daily_loss}"
+    )
+    lines.append(f"Account mode: {'DEMO' if pocket_option_cfg.is_demo else 'REAL MONEY'}")
+    lines.append(f"Fallback UTC offset (SIGNAL_UTC_OFFSET_HOURS): {trading_cfg.signal_utc_offset_hours:+g}")
+    return lines

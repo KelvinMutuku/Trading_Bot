@@ -70,18 +70,22 @@ async def run_signal(
     martingale_cfg: MartingaleConfig,
     risk_guard: DailyRiskGuard,
 ) -> None:
+    # Every log line for this signal starts with the channel it came from,
+    # so with several channels running at once it's clear whose signal is whose.
+    tag = f"[{signal.source_channel}] " if signal.source_channel else ""
+
     if not signal.is_valid:
-        logger.warning("Skipping unparseable signal: %s", signal.error)
+        logger.warning("%sSkipping unparseable signal: %s", tag, signal.error)
         return
 
     logger.info(
-        "Signal detected: %s %s (%s)",
-        signal.asset, signal.direction,
+        "%sSignal detected: %s %s (%s)",
+        tag, signal.asset, signal.direction,
         f"martingale x{len(signal.martingale_times)}" if signal.has_martingale else "single trade",
     )
 
     if not risk_guard.trading_allowed():
-        logger.warning("Daily loss cap hit -- skipping signal for %s", signal.asset)
+        logger.warning("%sDaily loss cap hit -- skipping signal for %s", tag, signal.asset)
         return
 
     seq = MartingaleSequence(martingale_cfg)
@@ -101,8 +105,8 @@ async def run_signal(
         else trading_cfg.signal_utc_offset_hours
     )
     logger.info(
-        "Using UTC offset %.2fh for %s (%s)",
-        effective_offset, signal.asset,
+        "%sUsing UTC offset %.2fh for %s (%s)",
+        tag, effective_offset, signal.asset,
         {"message": "stated in the message", "channel": "per-channel setting"}.get(signal.offset_source, ".env default"),
     )
 
@@ -114,22 +118,22 @@ async def run_signal(
         if entry_time is None:
             # signal.immediate case: no clock time given anywhere -> enter now.
             wait_s = 0.0
-            logger.info("Level %d for %s: immediate signal, entering now, stake=%.2f", level, signal.asset, stake)
+            logger.info("%sLevel %d for %s: immediate signal, entering now, stake=%.2f", tag, level, signal.asset, stake)
         else:
             try:
                 wait_s = _seconds_until(entry_time, effective_offset)
             except StaleSignalError as exc:
-                logger.error("Skipping signal for %s: %s", signal.asset, exc)
+                logger.error("%sSkipping signal for %s: %s", tag, signal.asset, exc)
                 return
             logger.info(
-                "Level %d for %s: waiting %.0fs until %s, stake=%.2f",
-                level, signal.asset, wait_s, entry_time, stake,
+                "%sLevel %d for %s: waiting %.0fs until %s, stake=%.2f",
+                tag, level, signal.asset, wait_s, entry_time, stake,
             )
 
         await asyncio.sleep(wait_s)
 
         if not risk_guard.trading_allowed():
-            logger.warning("Daily loss cap hit mid-sequence -- stopping")
+            logger.warning("%sDaily loss cap hit mid-sequence -- stopping", tag)
             break
 
         try:
@@ -138,12 +142,13 @@ async def run_signal(
                 direction=signal.direction,
                 amount=stake,
                 expiration_seconds=expiration_seconds,
+                tag=tag,
             )
         except AssetNotSupportedError as exc:
-            logger.error(str(exc))
+            logger.error("%s%s", tag, exc)
             return
 
-        won = await po.wait_for_result(deal, expiration_seconds)
+        won = await po.wait_for_result(deal, expiration_seconds, tag=tag)
         seq.record_result(won)
 
         if seq.finished:
@@ -153,6 +158,6 @@ async def run_signal(
     await po.refresh_balance()
 
     logger.info(
-        "Sequence done for %s: won=%s levels_used=%d total_staked=%.2f pnl=%.2f new_balance=%s",
-        signal.asset, seq.won, seq.level, seq.total_staked, seq.total_pnl, po.balance,
+        "%sSequence done for %s: won=%s levels_used=%d total_staked=%.2f pnl=%.2f new_balance=%s",
+        tag, signal.asset, seq.won, seq.level, seq.total_staked, seq.total_pnl, po.balance,
     )

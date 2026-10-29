@@ -59,6 +59,7 @@ class ParsedSignal:
     martingale_count: int = 0
     utc_offset_hours: float | None = None  # from the message ("UTC -3" -> -3.0) or, failing that, the channel's setting
     offset_source: str | None = None       # "message", "channel", or None (= use the .env default)
+    source_channel: str | None = None      # name of the Telegram channel it came from (set by the listener)
     immediate: bool = False                # True if the signal has no entry time at all -> trade now
     has_martingale: bool = False           # True only if the signal itself specified martingale levels/count
     is_valid: bool = False

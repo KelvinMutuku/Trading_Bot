@@ -190,6 +190,31 @@ resurfaces after a future `pip install -r requirements.txt`, just uninstall
 it again — it's safe to remove; aiohttp falls back to its built-in resolver
 without it.
 
+**The bot isn't using my `.env` (wrong stake, wrong mode...).** On startup the
+log prints which folder the bot runs from, which `.env` it loaded, and the
+stake/mode it ended up with, plus a worst-case cost for one losing martingale
+sequence. Check those lines first:
+
+- `NO .env LOADED: found '.env.txt'...` means the file is misnamed. Windows
+  hides `.txt` extensions (View > Show > File name extensions) and Notepad
+  likes to add one. It must be named exactly `.env`.
+- `.env loaded from: ...` showing an unexpected path means you're running a
+  different copy of the bot than the one you edited (an old folder, or a
+  scheduled task whose "Start in" folder points elsewhere).
+- `WARNING: the machine has an environment variable STARTING_STAKE=...` means
+  a Windows environment variable disagreed with `.env`. The bot uses `.env`
+  (it always wins), but remove the stray one so it stops confusing you:
+  `[Environment]::SetEnvironmentVariable("STARTING_STAKE", $null, "Machine")`
+  in an Administrator PowerShell (use `"User"` if it was a user variable).
+- If two bots seem to be trading, check `Get-Process python` for a leftover
+  copy still running from before.
+
+Files saved with a UTF-8 BOM or as UTF-16 (PowerShell's `echo > .env` does
+this) are handled automatically.
+
+**Logs show which channel each signal came from**, e.g.
+`[Lorenzo VIP] Level 0 for CAD/CHF: waiting 241s until 08:20, stake=2.00`.
+
 ## Project layout
 
 ```
@@ -200,6 +225,8 @@ telegram_listener.py  Telethon client, listens on selected channels
 executor.py            Runs one signal's full martingale sequence
 setup_channels.py      CLI to pick channels and set each channel's timezone offset
 main.py                 Wires it all together
+test_channel_offsets.py Tests for per-channel timezone offsets
+test_channel_labels.py  Tests that logs name the source channel
 ```
 
 ## Extending the parser for a new channel format
