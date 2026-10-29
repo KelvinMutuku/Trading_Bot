@@ -15,6 +15,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
 
+<<<<<<< HEAD
 
 
 def _load_env_file() -> dict:
@@ -59,6 +60,9 @@ def _load_env_file() -> dict:
 
 
 ENV_REPORT = _load_env_file()
+=======
+load_dotenv(override=True)
+>>>>>>> 3ff494b90cec3749010fbf215ba9fe8565b768a3
 
 BASE_DIR = Path(__file__).resolve().parent
 SELECTED_CHANNELS_FILE = BASE_DIR / "selected_channels.json"
